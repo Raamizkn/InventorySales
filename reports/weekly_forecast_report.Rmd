@@ -1,0 +1,316 @@
+---
+title: "Weekly Sales Forecast and Inventory Recommendations"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output: 
+  html_document:
+    theme: cosmo
+    toc: true
+    toc_float: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+
+# Load required libraries
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(plotly)
+library(knitr)
+library(kableExtra)
+library(lubridate)
+library(DT)
+
+# Load data
+model_ready_data <- readRDS("../data/processed/model_ready_data.rds")
+arima_results <- readRDS("../data/processed/arima_results.rds")
+prophet_results <- readRDS("../data/processed/prophet_results.rds")
+lstm_results <- readRDS("../data/processed/lstm_results.rds")
+inventory_recommendations <- readRDS("../data/processed/inventory_recommendations.rds")
+
+# Set forecast horizon
+forecast_horizon <- 7
+```
+
+## Executive Summary
+
+This report provides a weekly forecast of retail sales and inventory recommendations for the next `r forecast_horizon` days. The forecasts are generated using three different models (ARIMA, Prophet, and LSTM) and combined into an ensemble forecast for improved accuracy.
+
+### Key Metrics
+
+```{r key-metrics}
+# Calculate total forecasted sales for the next week
+ensemble_forecast <- inventory_recommendations$ensemble_forecast
+total_forecasted_sales <- sum(ensemble_forecast$ensemble_forecast)
+
+# Calculate average daily sales
+avg_daily_sales <- mean(ensemble_forecast$ensemble_forecast)
+
+# Get model performance metrics
+arima_metrics <- arima_results$evaluation$metrics
+prophet_metrics <- prophet_results$evaluation$metrics
+lstm_metrics <- lstm_results$evaluation$metrics
+
+# Create a metrics table
+metrics_table <- data.frame(
+  Metric = c("Total Forecasted Sales (Next 7 Days)", "Average Daily Sales (Next 7 Days)"),
+  Value = c(round(total_forecasted_sales, 2), round(avg_daily_sales, 2))
+)
+
+kable(metrics_table, format = "html", caption = "Key Forecast Metrics") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+```
+
+## Sales Forecast
+
+### Historical Sales and Forecast
+
+The chart below shows historical sales data along with forecasts from each model and the ensemble forecast.
+
+```{r sales-forecast-plot}
+# Get historical data
+historical_data <- model_ready_data$arima_data %>%
+  as_tibble() %>%
+  select(date, total_sales)
+
+# Get forecast data
+forecast_dates <- ensemble_forecast$date
+arima_forecast <- ensemble_forecast$arima_forecast
+prophet_forecast <- ensemble_forecast$prophet_forecast
+lstm_forecast <- ensemble_forecast$lstm_forecast
+ensemble_forecast_values <- ensemble_forecast$ensemble_forecast
+
+# Create a plot of historical data and forecasts
+p <- ggplot() +
+  # Historical data
+  geom_line(data = historical_data, aes(x = date, y = total_sales, color = "Historical"), size = 1) +
+  
+  # Add vertical line to separate historical and forecast
+  geom_vline(xintercept = as.numeric(max(historical_data$date)), linetype = "dashed", color = "gray50") +
+  
+  # Add forecasts
+  geom_line(data = data.frame(date = forecast_dates, forecast = arima_forecast),
+            aes(x = date, y = forecast, color = "ARIMA"), linetype = "dashed") +
+  geom_line(data = data.frame(date = forecast_dates, forecast = prophet_forecast),
+            aes(x = date, y = forecast, color = "Prophet"), linetype = "dashed") +
+  geom_line(data = data.frame(date = forecast_dates, forecast = lstm_forecast),
+            aes(x = date, y = forecast, color = "LSTM"), linetype = "dashed") +
+  geom_line(data = data.frame(date = forecast_dates, forecast = ensemble_forecast_values),
+            aes(x = date, y = forecast, color = "Ensemble"), size = 1.2) +
+  
+  # Customize plot
+  labs(
+    title = "Sales Forecast",
+    subtitle = paste("Next", forecast_horizon, "days"),
+    x = "Date",
+    y = "Total Sales",
+    color = "Model"
+  ) +
+  scale_color_manual(values = c(
+    "Historical" = "black",
+    "ARIMA" = "blue",
+    "Prophet" = "green",
+    "LSTM" = "orange",
+    "Ensemble" = "red"
+  )) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12)
+  )
+
+# Convert to plotly for interactivity
+ggplotly(p)
+```
+
+### Forecast Table
+
+The table below shows the daily sales forecasts for the next `r forecast_horizon` days from each model and the ensemble forecast.
+
+```{r forecast-table}
+# Create a forecast table
+forecast_table <- data.frame(
+  Date = forecast_dates,
+  ARIMA = round(arima_forecast, 2),
+  Prophet = round(prophet_forecast, 2),
+  LSTM = round(lstm_forecast, 2),
+  Ensemble = round(ensemble_forecast_values, 2)
+)
+
+# Display the table
+datatable(
+  forecast_table,
+  options = list(
+    pageLength = 7,
+    dom = 'Bfrtip',
+    buttons = c('copy', 'csv', 'excel')
+  ),
+  caption = "Daily Sales Forecasts",
+  rownames = FALSE
+)
+```
+
+## Model Performance
+
+The table below shows the performance metrics for each forecasting model based on the most recent evaluation period.
+
+```{r model-performance}
+# Create a model performance table
+performance_table <- data.frame(
+  Model = c("ARIMA", "Prophet", "LSTM"),
+  RMSE = c(
+    round(arima_metrics$rmse, 2),
+    round(prophet_metrics$rmse, 2),
+    round(lstm_metrics$rmse, 2)
+  ),
+  MAE = c(
+    round(arima_metrics$mae, 2),
+    round(prophet_metrics$mae, 2),
+    round(lstm_metrics$mae, 2)
+  ),
+  MAPE = c(
+    round(arima_metrics$mape, 2),
+    round(prophet_metrics$mape, 2),
+    round(lstm_metrics$mape, 2)
+  )
+)
+
+# Display the table
+kable(performance_table, format = "html", caption = "Model Performance Metrics") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+```
+
+## Inventory Recommendations
+
+Based on the sales forecasts, the following inventory recommendations are provided for each product.
+
+```{r inventory-recommendations}
+# Extract recommendations
+recommendations <- inventory_recommendations$recommendations
+
+# Create a recommendations table
+recommendations_table <- data.frame(
+  Product_ID = character(),
+  Product_Name = character(),
+  Safety_Stock = numeric(),
+  Reorder_Point = numeric(),
+  Recommended_Order_Quantity = numeric(),
+  Lead_Time_Days = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Fill the table with data from each product
+for (product_id in names(recommendations)) {
+  rec <- recommendations[[product_id]]
+  recommendations_table <- rbind(
+    recommendations_table,
+    data.frame(
+      Product_ID = rec$product_id,
+      Product_Name = rec$product_name,
+      Safety_Stock = round(rec$safety_stock, 2),
+      Reorder_Point = round(rec$reorder_point, 2),
+      Recommended_Order_Quantity = round(rec$recommended_order_quantity, 2),
+      Lead_Time_Days = rec$lead_time_days,
+      stringsAsFactors = FALSE
+    )
+  )
+}
+
+# Display the table
+datatable(
+  recommendations_table,
+  options = list(
+    pageLength = 10,
+    dom = 'Bfrtip',
+    buttons = c('copy', 'csv', 'excel')
+  ),
+  caption = "Inventory Recommendations",
+  rownames = FALSE
+)
+```
+
+## Product-Specific Forecasts
+
+The charts below show the forecasted sales for each product.
+
+```{r product-forecasts, results='asis'}
+# Get product data
+product_data <- model_ready_data$cleaned_data$products
+
+# Loop through each product
+for (i in 1:nrow(product_data)) {
+  product <- product_data[i, ]
+  product_id <- product$product_id
+  product_name <- product$product_name
+  
+  # Get recommendation for this product
+  rec <- recommendations[[product_id]]
+  
+  # Create a data frame for the forecast
+  product_forecast <- data.frame(
+    Date = rec$forecast_dates,
+    Forecast = rec$daily_forecast
+  )
+  
+  # Print product header
+  cat(paste0("### ", product_name, " (", product_id, ")\n\n"))
+  
+  # Create a plot
+  p <- ggplot(product_forecast, aes(x = Date, y = Forecast)) +
+    geom_line(color = "blue", size = 1) +
+    geom_point(color = "blue") +
+    geom_hline(yintercept = rec$reorder_point, linetype = "dashed", color = "red") +
+    geom_text(aes(x = min(Date), y = rec$reorder_point, label = "Reorder Point"), 
+              hjust = -0.1, vjust = -0.5, color = "red") +
+    labs(
+      title = paste("Forecast for", product_name),
+      subtitle = paste("Lead Time:", rec$lead_time_days, "days"),
+      x = "Date",
+      y = "Forecasted Sales"
+    ) +
+    theme_minimal()
+  
+  # Print the plot
+  print(p)
+  
+  # Print recommendation details
+  cat("\n**Inventory Recommendations:**\n\n")
+  
+  rec_details <- data.frame(
+    Metric = c("Safety Stock", "Reorder Point", "Economic Order Quantity", "Recommended Order Quantity"),
+    Value = c(
+      round(rec$safety_stock, 2),
+      round(rec$reorder_point, 2),
+      round(rec$economic_order_quantity, 2),
+      round(rec$recommended_order_quantity, 2)
+    )
+  )
+  
+  print(kable(rec_details, format = "html") %>%
+          kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE))
+  
+  cat("\n\n")
+}
+```
+
+## Conclusion
+
+This report provides sales forecasts and inventory recommendations for the next `r forecast_horizon` days. The ensemble forecast combines the strengths of multiple forecasting models to provide more accurate predictions. The inventory recommendations are designed to optimize stock levels while minimizing the risk of stockouts.
+
+**Key Actions:**
+
+1. Review the inventory recommendations for each product.
+2. Place orders for products that are approaching their reorder points.
+3. Adjust inventory levels based on the forecasted sales.
+
+---
+
+*Report generated on `r format(Sys.Date(), '%B %d, %Y')`* 

@@ -1,0 +1,3 @@
+product_id,product_name,category,supplier,lead_time_days,min_order_quantity
+P001,Basic T-Shirt,Apparel,Supplier A,7,50
+P002,Premium Jeans,Apparel,Supplier B,14,25 
